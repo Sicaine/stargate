@@ -1,0 +1,20 @@
+# METABEGIN
+# X-Env-Layer-Name: display-round-lcd
+# X-Env-Layer-Category: custom
+# X-Env-Layer-Desc: Settings for 3.4" 800x800 Round LCD Screen
+# X-Env-Layer-Version: 1.0.0
+# METAEND
+---
+mmdebstrap:
+  customize-hooks:
+    - |
+      set -eu
+      CONFIG_TXT="$1/boot/firmware/config.txt"
+
+      echo "Configuring 3.4\" 800x800 Round LCD..." >&2
+
+      # Change vc4-kms-v3d to vc4-fkms-v3d
+      sed -i 's/dtoverlay=vc4-kms-v3d/dtoverlay=vc4-fkms-v3d/' "$CONFIG_TXT"
+
+      # Append HDMI timings
+      printf '\n# Force custom display mode\nhdmi_group=2\nhdmi_mode=87\nhdmi_force_hotplug=1\n\n# Custom 800x800 Resolution and HDMI Timings\nhdmi_timings=800 0 68 32 200 800 0 68 32 200 0 0 0 60 0 59400000 0\n' >> "$CONFIG_TXT"
