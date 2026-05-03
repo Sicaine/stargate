@@ -12,3 +12,4 @@ image:
 
 layer:
   base: bookworm-minbase
+  display: display-round-lcd
