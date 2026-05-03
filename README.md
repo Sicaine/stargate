@@ -1,5 +1,7 @@
 # stargate
 
+Motivated by https://www.thingiverse.com/thing:7339084
+
 Contains everything necessary to run the stargate program on my raspi + dhd (fe/be) + stargate os.
 
 ## rpi-image-gen

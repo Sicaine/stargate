@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DHD — Stargate</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#04060d;color:#b0c8e0;
+  font-family:'Courier New',monospace;
+  min-height:100vh;display:flex;flex-direction:column;
+  align-items:center;overflow:hidden;position:relative;
+}
+canvas.bg{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* top bar */
+.topbar{
+  position:relative;z-index:2;width:100%;max-width:620px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:.8rem 1.2rem;border-bottom:1px solid #0e2040;
+}
+.back{text-decoration:none;color:#3a6090;font-size:.7rem;letter-spacing:.2em;transition:color .2s}
+.back:hover{color:#60a0d8}
+.page-title{font-size:.85rem;letter-spacing:.5em;color:#506880}
+
+/* pad container */
+.pad-wrap{
+  position:relative;z-index:1;
+  display:flex;flex-direction:column;align-items:center;
+  gap:1.2rem;padding:1rem 0 1.5rem;
+  flex:1;justify-content:center;
+}
+svg#pad{
+  width:min(90vw,540px);height:min(90vw,540px);
+  overflow:visible;
+}
+
+/* status */
+.status-panel{
+  position:relative;z-index:2;
+  width:min(90vw,540px);
+  border:1px solid #0e2040;border-radius:2px;
+  background:rgba(4,10,20,.9);padding:.7rem 1.1rem;
+  display:flex;flex-direction:column;gap:.4rem;
+}
+.status-glyphs{display:flex;gap:.4rem;flex-wrap:wrap;min-height:1.4rem}
+.glyph-tag{
+  font-size:.65rem;padding:.15rem .4rem;
+  border:1px solid #2a5080;border-radius:2px;
+  background:#0a1a30;color:#80b8e0;letter-spacing:.1em;
+}
+.status-msg{
+  font-size:.68rem;letter-spacing:.15em;
+  min-height:1rem;transition:color .3s;
+}
+.status-msg.ok{color:#40c878}
+.status-msg.err{color:#e85050}
+.status-msg.idle{color:#405870}
+.status-msg.open{color:#38bdf8}
+</style>
+</head>
+<body>
+<canvas class="bg" id="bg"></canvas>
+
+<div class="topbar">
+  <a href="/" class="back">← BACK</a>
+  <span class="page-title">DIAL HOME DEVICE</span>
+  <span style="width:60px"></span>
+</div>
+
+<div class="pad-wrap">
+  <svg id="pad" viewBox="0 0 580 580" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="padBg" cx="50%" cy="50%">
+        <stop offset="0%" stop-color="#0c1828"/>
+        <stop offset="75%" stop-color="#08111e"/>
+        <stop offset="100%" stop-color="#040a14"/>
+      </radialGradient>
+      <radialGradient id="rimGlow" cx="50%" cy="50%">
+        <stop offset="82%" stop-color="transparent"/>
+        <stop offset="90%" stop-color="#0e2840"/>
+        <stop offset="96%" stop-color="#183858"/>
+        <stop offset="100%" stop-color="#0e2840"/>
+      </radialGradient>
+      <radialGradient id="centerNorm" cx="38%" cy="32%">
+        <stop offset="0%" stop-color="#ff5555"/>
+        <stop offset="55%" stop-color="#bb1111"/>
+        <stop offset="100%" stop-color="#550000"/>
+      </radialGradient>
+      <radialGradient id="centerOpen" cx="38%" cy="32%">
+        <stop offset="0%" stop-color="#70eeff"/>
+        <stop offset="55%" stop-color="#0098cc"/>
+        <stop offset="100%" stop-color="#003860"/>
+      </radialGradient>
+      <filter id="glowAmber" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="glowRed" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="glowBlue" x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+
+    <!-- DHD body -->
+    <circle cx="290" cy="290" r="285" fill="url(#padBg)"/>
+    <circle cx="290" cy="290" r="285" fill="url(#rimGlow)"/>
+    <circle cx="290" cy="290" r="280" fill="none" stroke="#0e2840" stroke-width="2"/>
+    <circle cx="290" cy="290" r="270" fill="none" stroke="#081a2e" stroke-width="1"/>
+
+    <!-- symbol buttons injected by JS -->
+    <g id="symbols"></g>
+
+    <!-- kawoosh wave (animated on dial) -->
+    <circle id="wave" cx="290" cy="290" r="0" fill="none" stroke="#38bdf8" stroke-width="3" opacity="0" pointer-events="none"/>
+
+    <!-- center button -->
+    <circle id="centerGlow" cx="290" cy="290" r="50" fill="#38bdf8" opacity="0" filter="url(#glowBlue)" pointer-events="none"/>
+    <circle id="centerBtn" cx="290" cy="290" r="44"
+      fill="url(#centerNorm)" stroke="#cc1111" stroke-width="2.5"
+      style="cursor:pointer" filter="url(#glowRed)"/>
+    <circle cx="290" cy="290" r="30" fill="none" stroke="#ff222230" stroke-width="6" pointer-events="none"/>
+    <circle cx="290" cy="290" r="18" fill="none" stroke="#ff222218" stroke-width="4" pointer-events="none"/>
+    <!-- dome highlight -->
+    <ellipse cx="282" cy="278" rx="12" ry="8" fill="rgba(255,120,120,.18)" pointer-events="none"/>
+  </svg>
+
+  <div class="status-panel">
+    <div id="glyphTags" class="status-glyphs"></div>
+    <div id="statusMsg" class="status-msg idle">AWAITING GLYPH INPUT — SELECT 6 COORDINATES</div>
+  </div>
+</div>
+
+<script>
+// ── symbols ───────────────────────────────────────────────────────────────────
+const SYMS = [
+  {id:1, name:"Crater",       a:"CRT"}, {id:2, name:"Virgo",        a:"VIR"},
+  {id:3, name:"Boötes",       a:"BOO"}, {id:4, name:"Centaurus",    a:"CEN"},
+  {id:5, name:"Libra",        a:"LIB"}, {id:6, name:"Serpens",      a:"SER"},
+  {id:7, name:"Norma",        a:"NOR"}, {id:8, name:"Scorpius",     a:"SCO"},
+  {id:9, name:"Corona Aus.",  a:"CRA"}, {id:10,name:"Scutum",       a:"SCT"},
+  {id:11,name:"Sagittarius",  a:"SGR"}, {id:12,name:"Aquila",       a:"AQL"},
+  {id:13,name:"Microscopium", a:"MIC"}, {id:14,name:"Capricornus",  a:"CAP"},
+  {id:15,name:"Piscis Aus.",  a:"PSA"}, {id:16,name:"Equuleus",     a:"EQU"},
+  {id:17,name:"Aquarius",     a:"AQR"}, {id:18,name:"Pegasus",      a:"PEG"},
+  {id:19,name:"Sculptor",     a:"SCL"}, {id:20,name:"Pisces",       a:"PSC"},
+  {id:21,name:"Andromeda",    a:"AND"}, {id:22,name:"Triangulum",   a:"TRI"},
+  {id:23,name:"Aries",        a:"ARI"}, {id:24,name:"Perseus",      a:"PER"},
+  {id:25,name:"Cetus",        a:"CET"}, {id:26,name:"Taurus",       a:"TAU"},
+  {id:27,name:"Auriga",       a:"AUR"}, {id:28,name:"Eridanus",     a:"ERI"},
+  {id:29,name:"Orion",        a:"ORI"}, {id:30,name:"Canis Minor",  a:"CMI"},
+  {id:31,name:"Monoceros",    a:"MON"}, {id:32,name:"Gemini",       a:"GEM"},
+  {id:33,name:"Hydra",        a:"HYA"}, {id:34,name:"Lynx",         a:"LYN"},
+  {id:35,name:"Cancer",       a:"CNC"}, {id:36,name:"Sextans",      a:"SEX"},
+  {id:37,name:"Leo Minor",    a:"LMI"}, {id:38,name:"Leo",          a:"LEO"},
+];
+
+// Ring layout: 9 inner + 19 middle + 10 outer = 38
+const RINGS = [
+  {syms: SYMS.slice(0,9),  r:112, btnR:17},
+  {syms: SYMS.slice(9,28), r:196, btnR:15},
+  {syms: SYMS.slice(28),   r:268, btnR:17},
+];
+const CX=290, CY=290;
+
+// ── state ─────────────────────────────────────────────────────────────────────
+let selected = [];    // up to 6 symbol IDs
+let gateOpen = false;
+let busy = false;
+
+// ── build SVG buttons ─────────────────────────────────────────────────────────
+const ns = "http://www.w3.org/2000/svg";
+const symG = document.getElementById('symbols');
+
+function mkBtn(sym, x, y, btnR) {
+  const g = document.createElementNS(ns,'g');
+  g.setAttribute('transform',`translate(${x.toFixed(1)},${y.toFixed(1)})`);
+  g.style.cursor = 'pointer';
+  g.dataset.id = sym.id;
+
+  const circ = document.createElementNS(ns,'circle');
+  circ.setAttribute('r', btnR);
+  circ.setAttribute('class','sym-circle');
+
+  // outer glow ring (hidden by default)
+  const glow = document.createElementNS(ns,'circle');
+  glow.setAttribute('r', btnR+4);
+  glow.setAttribute('class','sym-glow');
+  glow.setAttribute('fill','none');
+  glow.setAttribute('stroke','#ea580c');
+  glow.setAttribute('stroke-width','2');
+  glow.setAttribute('opacity','0');
+  glow.setAttribute('pointer-events','none');
+
+  const txt = document.createElementNS(ns,'text');
+  txt.setAttribute('text-anchor','middle');
+  txt.setAttribute('dominant-baseline','central');
+  txt.setAttribute('font-size', btnR < 16 ? '6' : '6.5');
+  txt.setAttribute('font-family','Courier New,monospace');
+  txt.setAttribute('pointer-events','none');
+  txt.setAttribute('class','sym-text');
+  txt.textContent = sym.a;
+
+  const title = document.createElementNS(ns,'title');
+  title.textContent = `${sym.id}. ${sym.name}`;
+
+  g.appendChild(glow);
+  g.appendChild(circ);
+  g.appendChild(txt);
+  g.appendChild(title);
+  g.addEventListener('click', ()=>toggleSym(sym.id));
+  symG.appendChild(g);
+  applySymState(sym.id, false);
+}
+
+RINGS.forEach(ring => {
+  const step = (2*Math.PI) / ring.syms.length;
+  ring.syms.forEach((sym, i) => {
+    const angle = i * step - Math.PI/2; // start at top
+    const x = CX + ring.r * Math.cos(angle);
+    const y = CY + ring.r * Math.sin(angle);
+    mkBtn(sym, x, y, ring.btnR);
+  });
+});
+
+// ── state helpers ─────────────────────────────────────────────────────────────
+function applySymState(id, on) {
+  const g = symG.querySelector(`[data-id="${id}"]`);
+  if (!g) return;
+  const circ = g.querySelector('.sym-circle');
+  const txt  = g.querySelector('.sym-text');
+  const glow = g.querySelector('.sym-glow');
+  if (on) {
+    circ.setAttribute('fill','#7c2c06');
+    circ.setAttribute('stroke','#ea580c');
+    circ.setAttribute('stroke-width','2');
+    circ.setAttribute('filter','url(#glowAmber)');
+    txt.setAttribute('fill','#fed7aa');
+    glow.setAttribute('opacity','1');
+  } else {
+    circ.setAttribute('fill','#080f1c');
+    circ.setAttribute('stroke','#1c3050');
+    circ.setAttribute('stroke-width','1');
+    circ.removeAttribute('filter');
+    txt.setAttribute('fill','#4a6880');
+    glow.setAttribute('opacity','0');
+  }
+}
+
+function updateCenterBtn() {
+  const btn  = document.getElementById('centerBtn');
+  const glow = document.getElementById('centerGlow');
+  if (gateOpen) {
+    btn.setAttribute('fill','url(#centerOpen)');
+    btn.setAttribute('stroke','#0098cc');
+    glow.setAttribute('opacity','.25');
+  } else {
+    btn.setAttribute('fill','url(#centerNorm)');
+    btn.setAttribute('stroke','#cc1111');
+    glow.setAttribute('opacity','0');
+  }
+  // pulse when 6 selected and gate closed
+  btn.style.animation = (!gateOpen && selected.length===6)
+    ? 'btnPulse 1.2s ease-in-out infinite' : '';
+}
+
+function updateStatus() {
+  const tags = document.getElementById('glyphTags');
+  const msg  = document.getElementById('statusMsg');
+  tags.innerHTML = selected.map(id=>{
+    const s = SYMS.find(x=>x.id===id);
+    return `<span class="glyph-tag">${s.a}</span>`;
+  }).join('');
+
+  msg.className = 'status-msg';
+  if (gateOpen) {
+    msg.textContent = 'WORMHOLE ACTIVE — PRESS DOME TO DISCONNECT';
+    msg.classList.add('open');
+  } else if (selected.length===6) {
+    msg.textContent = 'COORDINATES LOCKED — PRESS DOME TO DIAL';
+    msg.classList.add('ok');
+  } else {
+    msg.textContent = `AWAITING GLYPH INPUT — ${6-selected.length} REMAINING`;
+    msg.classList.add('idle');
+  }
+}
+
+// ── interactions ──────────────────────────────────────────────────────────────
+function toggleSym(id) {
+  if (busy || gateOpen) return;
+  const idx = selected.indexOf(id);
+  if (idx >= 0) {
+    selected.splice(idx,1);
+    applySymState(id, false);
+  } else if (selected.length < 6) {
+    selected.push(id);
+    applySymState(id, true);
+  }
+  updateCenterBtn();
+  updateStatus();
+}
+
+document.getElementById('centerBtn').addEventListener('click', pressCenter);
+
+async function pressCenter() {
+  if (busy) return;
+  if (gateOpen) { await disconnect(); return; }
+  if (selected.length !== 6) return;
+  await dial();
+}
+
+async function dial() {
+  busy = true;
+  setStatus('DIALING…', 'idle');
+  try {
+    const r = await fetch('/api/dial',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({symbols: [...selected, 39]}), // 39 = Earth/origin, encoded by pressing the dome
+    });
+    const d = await r.json();
+    if (d.ok) {
+      gateOpen = true;
+      playKawoosh();
+      setStatus('WORMHOLE ESTABLISHED', 'ok');
+    } else {
+      setStatus(d.message.toUpperCase(), 'err');
+    }
+  } catch(e){ setStatus('CONNECTION ERROR', 'err'); }
+  updateCenterBtn();
+  busy = false;
+}
+
+async function disconnect() {
+  busy = true;
+  setStatus('DISCONNECTING…', 'idle');
+  try {
+    const r = await fetch('/api/disconnect',{method:'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      gateOpen = false;
+      selected = [];
+      SYMS.forEach(s=>applySymState(s.id,false));
+      setStatus('WORMHOLE DISENGAGED', 'idle');
+    } else {
+      setStatus(d.message.toUpperCase(), 'err');
+    }
+  } catch(e){ setStatus('CONNECTION ERROR','err'); }
+  updateCenterBtn();
+  updateStatus();
+  busy = false;
+}
+
+function setStatus(txt, cls) {
+  const el = document.getElementById('statusMsg');
+  el.className = 'status-msg ' + cls;
+  el.textContent = txt;
+}
+
+// ── kawoosh animation ─────────────────────────────────────────────────────────
+function playKawoosh() {
+  const wave = document.getElementById('wave');
+  let r=44, op=0.9;
+  wave.setAttribute('r', r);
+  wave.setAttribute('opacity', op);
+  const step = () => {
+    r += 7; op = Math.max(0, op-0.06);
+    wave.setAttribute('r', r);
+    wave.setAttribute('opacity', op);
+    if (op > 0) requestAnimationFrame(step);
+    else wave.setAttribute('opacity','0');
+  };
+  requestAnimationFrame(step);
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+updateCenterBtn();
+updateStatus();
+
+// starfield bg
+const bgC = document.getElementById('bg');
+const bctx = bgC.getContext('2d');
+function drawBg(){
+  bgC.width=innerWidth; bgC.height=innerHeight;
+  bctx.fillStyle='#04060d';
+  bctx.fillRect(0,0,bgC.width,bgC.height);
+  for(let i=0;i<160;i++){
+    const x=Math.random()*bgC.width,y=Math.random()*bgC.height;
+    const r=Math.random()*1.1+.1,a=Math.random()*.7+.2;
+    bctx.beginPath();bctx.arc(x,y,r,0,Math.PI*2);
+    bctx.fillStyle=`rgba(180,210,255,${a})`;bctx.fill();
+  }
+}
+drawBg();
+window.addEventListener('resize',drawBg);
+</script>
+
+<style>
+@keyframes btnPulse{
+  0%,100%{opacity:1}
+  50%{opacity:.55}
+}
+</style>
+</body>
+</html>

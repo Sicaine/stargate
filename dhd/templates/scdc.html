@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SCDC — Stargate</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#020508;color:#d8eef8;
+  font-family:'Courier New',monospace;font-size:16px;
+  height:100vh;display:flex;flex-direction:column;
+  overflow:hidden;
+}
+canvas.bg{position:fixed;inset:0;z-index:0;pointer-events:none}
+
+/* top bar */
+.topbar{
+  position:relative;z-index:2;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:.85rem 1.8rem;border-bottom:2px solid #284838;
+  background:rgba(2,5,8,.98);flex-shrink:0;
+}
+.back{text-decoration:none;color:#70c898;font-size:1rem;letter-spacing:.2em;transition:color .2s}
+.back:hover{color:#a0f0c0}
+.page-title{font-size:1rem;letter-spacing:.3em;color:#a0d8b8}
+
+/* upper half — gate + info side by side */
+.gate-section{
+  position:relative;z-index:1;
+  display:flex;gap:2.5rem;align-items:center;justify-content:center;
+  padding:1.2rem 2.5rem;
+  border-bottom:2px solid #284838;
+  flex-shrink:0;
+  background:rgba(2,7,4,.94);
+}
+
+/* gate SVG — no pixel cap, pure vh so it fills the space */
+svg#gate{
+  width:min(46vh,560px);height:min(46vh,560px);
+  flex-shrink:0;
+}
+
+/* info panel to the right of the gate */
+.gate-info{
+  display:flex;flex-direction:column;gap:1.4rem;
+  min-width:300px;flex:1;max-width:480px;
+}
+
+/* address slots */
+.addr-label{font-size:.9rem;letter-spacing:.2em;color:#90c8a8;margin-bottom:.35rem;font-weight:bold}
+.addr-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.addr-slot{
+  width:58px;height:44px;
+  border:2px solid #305848;border-radius:3px;
+  background:#040e08;
+  display:flex;align-items:center;justify-content:center;
+  font-size:.95rem;letter-spacing:.08em;color:#5a8870;
+  transition:all .25s;
+}
+.addr-slot.filled{
+  border-color:#50b870;background:#071812;color:#88f0a8;
+}
+.addr-slot.locked{
+  border-color:#90e050;background:#091e06;color:#c0ff80;
+  box-shadow:0 0 14px #60a03040;
+}
+
+/* chevron status */
+.chev-status{
+  font-size:1.05rem;letter-spacing:.1em;color:#88b8a0;
+  min-height:1.4rem;line-height:1.4;
+}
+.chev-status.encoding{color:#80e898}
+.chev-status.locked{color:#b0ff70;text-shadow:0 0 14px #70ff5070}
+.chev-status.error{color:#f07070}
+
+/* terminal log */
+.log-wrap{
+  border:2px solid #284838;border-radius:3px;
+  background:#010806;
+  height:160px;overflow-y:auto;padding:.6rem 1rem;
+}
+.log-line{font-size:.9rem;line-height:1.7;color:#6ab888;white-space:nowrap}
+.log-line.hi{color:#80e8a0}
+.log-line.warn{color:#e09050}
+.log-line.good{color:#80ff98;text-shadow:0 0 10px #40ff6050}
+.log-line.bad{color:#f07070}
+
+/* lower half — keyboard */
+.keyboard-section{
+  position:relative;z-index:1;
+  flex:1;overflow-y:auto;
+  padding:1.2rem 1.5rem 1.5rem;
+  background:rgba(2,4,8,.94);
+  display:flex;flex-direction:column;gap:1.1rem;
+}
+
+.kb-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(82px,1fr));
+  gap:.55rem;
+}
+.sym-btn{
+  padding:.65rem .4rem;
+  border:2px solid #1e3a52;border-radius:3px;
+  background:#030d1a;color:#68a8c8;
+  font-family:'Courier New',monospace;font-size:.95rem;letter-spacing:.05em;
+  cursor:pointer;text-align:center;line-height:1.4;
+  transition:all .15s;user-select:none;
+}
+.sym-btn:hover:not(.disabled){
+  border-color:#385878;background:#071828;color:#90c8e8;
+}
+.sym-btn.active{
+  border-color:#50a870;background:#081814;color:#88f0a8;
+  box-shadow:0 0 12px #30904040;
+}
+.sym-btn.disabled{
+  opacity:.22;cursor:not-allowed;
+}
+.sym-id{font-size:.72rem;color:#406880;display:block;margin-top:.1rem}
+
+/* action buttons */
+.actions{display:flex;gap:1.1rem;flex-wrap:wrap}
+.act-btn{
+  padding:.85rem 2.2rem;
+  border:2px solid;border-radius:3px;
+  font-family:'Courier New',monospace;font-size:1rem;letter-spacing:.2em;
+  cursor:pointer;background:transparent;
+  transition:all .2s;
+}
+.act-btn.dial{
+  border-color:#489050;color:#80d890;
+}
+.act-btn.dial:not(:disabled):hover{
+  background:#071610;border-color:#68c070;color:#a8f0b0;
+  box-shadow:0 0 22px #38804040;
+}
+.act-btn.dial:disabled{border-color:#1c3820;color:#3a5840;cursor:not-allowed}
+
+.act-btn.disc{
+  border-color:#904050;color:#d88090;
+}
+.act-btn.disc:not(:disabled):hover{
+  background:#1a0608;border-color:#c06070;color:#f8a0a8;
+}
+.act-btn.disc:disabled{border-color:#2a1018;color:#583038;cursor:not-allowed}
+
+.act-btn.iris{
+  border-color:#407888;color:#70b8d0;
+}
+.act-btn.iris:not(:disabled):hover{
+  background:#04101c;border-color:#68b8d8;color:#98d8f0;
+}
+</style>
+</head>
+<body>
+<canvas class="bg" id="bg"></canvas>
+
+<div class="topbar">
+  <a href="/" class="back">← BACK</a>
+  <span class="page-title">STARGATE COMMAND DIALING COMPUTER</span>
+  <span style="width:60px"></span>
+</div>
+
+<!-- gate display -->
+<div class="gate-section">
+  <div class="gate-info">
+    <div>
+      <div class="addr-label">DESTINATION ADDRESS</div>
+      <div class="addr-row">
+        <div class="addr-slot" id="slot0">—</div>
+        <div class="addr-slot" id="slot1">—</div>
+        <div class="addr-slot" id="slot2">—</div>
+        <div class="addr-slot" id="slot3">—</div>
+        <div class="addr-slot" id="slot4">—</div>
+        <div class="addr-slot" id="slot5">—</div>
+        <div class="addr-slot" id="slot6">—</div>
+      </div>
+    </div>
+
+    <div id="chevStatus" class="chev-status">AWAITING INPUT</div>
+
+    <div class="log-wrap" id="logWrap">
+      <div class="log-line">STARGATE COMMAND DIALING COMPUTER v4.1.2</div>
+      <div class="log-line">SYSTEM ONLINE — AWAITING CHEVRON INPUT</div>
+    </div>
+  </div>
+
+  <svg id="gate" viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="gateRing" cx="50%" cy="50%">
+        <stop offset="78%" stop-color="transparent"/>
+        <stop offset="82%" stop-color="#0a2018"/>
+        <stop offset="90%" stop-color="#142e22"/>
+        <stop offset="100%" stop-color="#0a1e16"/>
+      </radialGradient>
+      <filter id="chGlow" x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="horizonGlow" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="symGlow" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <radialGradient id="eventHorizon" cx="50%" cy="50%">
+        <stop offset="0%" stop-color="#38bdf8" stop-opacity=".9"/>
+        <stop offset="50%" stop-color="#0ea5e9" stop-opacity=".5"/>
+        <stop offset="100%" stop-color="#0284c7" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+
+    <!-- gate body rings -->
+    <circle cx="140" cy="140" r="134" fill="none" stroke="#1a4028" stroke-width="3"/>
+    <circle cx="140" cy="140" r="122" fill="url(#gateRing)"/>
+    <circle cx="140" cy="140" r="122" fill="none" stroke="#285a38" stroke-width="2"/>
+    <circle cx="140" cy="140" r="102" fill="none" stroke="#1a3828" stroke-width="2.5"/>
+    <circle cx="140" cy="140" r="87"  fill="none" stroke="#102018" stroke-width="1.5"/>
+
+    <!-- event horizon (hidden until gate open) -->
+    <circle id="horizon" cx="140" cy="140" r="84" fill="url(#eventHorizon)" opacity="0"/>
+    <circle id="horizonGlowEl" cx="140" cy="140" r="84" fill="#0ea5e9" opacity="0" filter="url(#horizonGlow)"/>
+
+    <!-- rotating inner ring — tick marks only, no labels -->
+    <g id="rotatingRing"></g>
+
+    <!-- current symbol displayed large in center during dialing -->
+    <g id="centerSym" opacity="0" pointer-events="none">
+      <text id="cSymAbbr"
+        x="140" y="136" text-anchor="middle" dominant-baseline="middle"
+        font-size="38" font-family="Courier New, monospace" font-weight="bold"
+        fill="#38d8c0" filter="url(#symGlow)"></text>
+      <text id="cSymName"
+        x="140" y="164" text-anchor="middle" dominant-baseline="middle"
+        font-size="10" font-family="Courier New, monospace"
+        fill="#28a890"></text>
+    </g>
+
+    <!-- chevrons injected by JS — stay fixed -->
+    <g id="chevrons"></g>
+
+    <!-- lock notch at top (270°) — fixed indicator where symbols lock in -->
+    <polygon id="lockNotch"
+      points="140,24 130,46 150,46"
+      fill="#2a1000" stroke="#603000" stroke-width="1.5" pointer-events="none"/>
+  </svg>
+</div>
+
+<!-- keyboard -->
+<div class="keyboard-section">
+  <div class="kb-grid" id="kbGrid"></div>
+  <div class="actions">
+    <button class="act-btn dial" id="btnDial" disabled>DIAL</button>
+    <button class="act-btn disc" id="btnDisc" disabled>DISCONNECT</button>
+    <button class="act-btn iris" id="btnIris">IRIS OPEN</button>
+  </div>
+</div>
+
+<script>
+// ── symbols ───────────────────────────────────────────────────────────────────
+const SYMS = [
+  {id:1, name:"Crater",       a:"CRT"}, {id:2, name:"Virgo",        a:"VIR"},
+  {id:3, name:"Boötes",       a:"BOO"}, {id:4, name:"Centaurus",    a:"CEN"},
+  {id:5, name:"Libra",        a:"LIB"}, {id:6, name:"Serpens",      a:"SER"},
+  {id:7, name:"Norma",        a:"NOR"}, {id:8, name:"Scorpius",     a:"SCO"},
+  {id:9, name:"Corona Aus.",  a:"CRA"}, {id:10,name:"Scutum",       a:"SCT"},
+  {id:11,name:"Sagittarius",  a:"SGR"}, {id:12,name:"Aquila",       a:"AQL"},
+  {id:13,name:"Microscopium", a:"MIC"}, {id:14,name:"Capricornus",  a:"CAP"},
+  {id:15,name:"Piscis Aus.",  a:"PSA"}, {id:16,name:"Equuleus",     a:"EQU"},
+  {id:17,name:"Aquarius",     a:"AQR"}, {id:18,name:"Pegasus",      a:"PEG"},
+  {id:19,name:"Sculptor",     a:"SCL"}, {id:20,name:"Pisces",       a:"PSC"},
+  {id:21,name:"Andromeda",    a:"AND"}, {id:22,name:"Triangulum",   a:"TRI"},
+  {id:23,name:"Aries",        a:"ARI"}, {id:24,name:"Perseus",      a:"PER"},
+  {id:25,name:"Cetus",        a:"CET"}, {id:26,name:"Taurus",       a:"TAU"},
+  {id:27,name:"Auriga",       a:"AUR"}, {id:28,name:"Eridanus",     a:"ERI"},
+  {id:29,name:"Orion",        a:"ORI"}, {id:30,name:"Canis Minor",  a:"CMI"},
+  {id:31,name:"Monoceros",    a:"MON"}, {id:32,name:"Gemini",       a:"GEM"},
+  {id:33,name:"Hydra",        a:"HYA"}, {id:34,name:"Lynx",         a:"LYN"},
+  {id:35,name:"Cancer",       a:"CNC"}, {id:36,name:"Sextans",      a:"SEX"},
+  {id:37,name:"Leo Minor",    a:"LMI"}, {id:38,name:"Leo",          a:"LEO"},
+  {id:39,name:"Origin (Earth)", a:"⊕"},
+];
+
+// ── state ─────────────────────────────────────────────────────────────────────
+let selected  = [];   // symbol IDs in order
+let gateOpen  = false;
+let irisOpen  = false;
+let busy      = false;
+let ringAngle = 0;    // current cumulative rotation of the inner ring (degrees)
+
+// ── build gate ────────────────────────────────────────────────────────────────
+const ns = "http://www.w3.org/2000/svg";
+const chevG   = document.getElementById('chevrons');
+const rotRing = document.getElementById('rotatingRing');
+const CX=140, CY=140, RING_R=112, INNER_R=94;
+const SYM_R = 105; // radius where ring symbols sit (middle of ring body)
+
+// 7 chevrons: 3 left, 3 right, 1 top — no bottom (floor).
+// Encoding order: bottom-left → mid-left → upper-left → upper-right → mid-right → bottom-right → TOP (lock, ch6)
+const CHEV_ANGLES = [150, 190, 230, 310, 350, 30, 270];
+
+CHEV_ANGLES.forEach((deg,i) => {
+  const rad = deg * Math.PI/180;
+  const px = CX + RING_R * Math.cos(rad);
+  const py = CY + RING_R * Math.sin(rad);
+  const w = 5;
+  const ir = RING_R - 13;
+  const p1 = [px+w*Math.cos(rad+Math.PI/2), py+w*Math.sin(rad+Math.PI/2)];
+  const p2 = [px+w*Math.cos(rad-Math.PI/2), py+w*Math.sin(rad-Math.PI/2)];
+  const tip= [CX+ir*Math.cos(rad), CY+ir*Math.sin(rad)];
+
+  const poly = document.createElementNS(ns,'polygon');
+  poly.setAttribute('points',`${p1[0].toFixed(1)},${p1[1].toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)} ${tip[0].toFixed(1)},${tip[1].toFixed(1)}`);
+  poly.setAttribute('fill','#070e08');
+  poly.setAttribute('stroke','#0e2018');
+  poly.setAttribute('stroke-width','0.8');
+  poly.id = `ch${i}`;
+  chevG.appendChild(poly);
+});
+
+// Build rotating ring — tick marks only (39 positions, no labels)
+SYMS.forEach((_, i) => {
+  const rad     = (i / SYMS.length) * 2 * Math.PI;
+  const isMajor = i % 3 === 0;
+  const r1 = isMajor ? 90  : 93;   // inner radius of tick
+  const r2 = isMajor ? 112 : 109;  // outer radius of tick
+  const line = document.createElementNS(ns, 'line');
+  line.setAttribute('x1', (CX + r1 * Math.cos(rad)).toFixed(2));
+  line.setAttribute('y1', (CY + r1 * Math.sin(rad)).toFixed(2));
+  line.setAttribute('x2', (CX + r2 * Math.cos(rad)).toFixed(2));
+  line.setAttribute('y2', (CY + r2 * Math.sin(rad)).toFixed(2));
+  line.setAttribute('stroke', isMajor ? '#2a5038' : '#1a3028');
+  line.setAttribute('stroke-width', isMajor ? '1.5' : '0.8');
+  rotRing.appendChild(line);
+});
+
+// ── build keyboard ────────────────────────────────────────────────────────────
+const grid = document.getElementById('kbGrid');
+SYMS.forEach(sym=>{
+  const btn = document.createElement('button');
+  btn.className = 'sym-btn';
+  btn.id = `kb${sym.id}`;
+  btn.innerHTML = `${sym.a}<span class="sym-id">${sym.id}</span>`;
+  btn.title = sym.name;
+  btn.addEventListener('click', ()=>toggleSym(sym.id));
+  grid.appendChild(btn);
+});
+
+// ── interaction ───────────────────────────────────────────────────────────────
+function toggleSym(id) {
+  if (busy || gateOpen) return;
+  const idx = selected.indexOf(id);
+  if (idx >= 0) {
+    selected.splice(idx,1);
+  } else if (selected.length < 7) {
+    selected.push(id);
+    const chevIdx = selected.length-1; // chevron for this position (0-6)
+    encodeChevron(chevIdx, id);
+  }
+  refreshUI();
+}
+
+function encodeChevron(chevIdx, symId) {
+  if (chevIdx > 6) return;
+  const poly = document.getElementById(`ch${chevIdx}`);
+  const sym = SYMS.find(s=>s.id===symId);
+  poly.setAttribute('fill','#664400');
+  poly.setAttribute('stroke','#cc8800');
+  poly.setAttribute('filter','url(#chGlow)');
+  log(`CHEVRON ${chevIdx+1} ENCODED :: ${sym.a}`, 'encoding');
+  setChevStatus(`CHEVRON ${chevIdx+1} ENCODED`, 'encoding');
+}
+
+function resetChevrons() {
+  for (let i = 0; i < 7; i++) {
+    const p = document.getElementById(`ch${i}`);
+    p.setAttribute('fill','#070e08');
+    p.setAttribute('stroke','#0e2018');
+    p.setAttribute('stroke-width','0.8');
+    p.removeAttribute('filter');
+  }
+}
+
+function refreshUI() {
+  // keyboard buttons
+  SYMS.forEach(s=>{
+    const btn = document.getElementById(`kb${s.id}`);
+    const on = selected.includes(s.id);
+    const full = selected.length===7 && !on;
+    btn.className = 'sym-btn' + (on?' active':'') + ((full||gateOpen)?' disabled':'');
+  });
+
+  // address slots 0-6 (all 7, including origin at slot 6)
+  for(let i=0;i<7;i++){
+    const slot = document.getElementById(`slot${i}`);
+    if (selected[i] != null) {
+      const s = SYMS.find(x=>x.id===selected[i]);
+      slot.textContent = s.a;
+      slot.className = 'addr-slot filled';
+    } else {
+      slot.textContent = '—';
+      slot.className = 'addr-slot';
+    }
+  }
+
+  // action buttons
+  document.getElementById('btnDial').disabled = selected.length!==7 || gateOpen || busy;
+  document.getElementById('btnDisc').disabled = !gateOpen || busy;
+  document.getElementById('btnIris').textContent = irisOpen ? 'IRIS CLOSE' : 'IRIS OPEN';
+
+  // idle status
+  if (!gateOpen && selected.length < 7) {
+    setChevStatus(`AWAITING INPUT — ${7-selected.length} GLYPHS REMAINING`, '');
+  } else if (!gateOpen && selected.length===7) {
+    setChevStatus('ALL CHEVRONS ENCODED — READY TO DIAL', 'encoding');
+  }
+}
+
+// ── actions ───────────────────────────────────────────────────────────────────
+document.getElementById('btnDial').addEventListener('click', doDial);
+document.getElementById('btnDisc').addEventListener('click', doDisconnect);
+document.getElementById('btnIris').addEventListener('click', doIris);
+
+async function doDial() {
+  if (busy || selected.length!==7) return;
+  // Properly resume AudioContext while still in the user-gesture call stack.
+  // We await it so the context is guaranteed 'running' before any sound plays.
+  try { await getAudio().resume(); } catch(e) { log('AUDIO: ' + e.message, 'warn'); }
+  busy=true; refreshUI();
+  log('VERIFYING ADDRESS…','');
+  setChevStatus('VERIFYING…','encoding');
+  try{
+    const r = await fetch('/api/dial',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({symbols:selected}),
+    });
+    const d = await r.json();
+    if(d.ok){
+      log('ADDRESS CONFIRMED — INITIATING DIALING SEQUENCE','hi');
+      resetChevrons();
+      clearSlotsForAnimation();   // wipe slots — they fill in one-by-one during sequence
+      await dialSequence(selected);
+      gateOpen=true;
+      playKawooshSound();
+      showHorizon(true);
+      log('WORMHOLE ESTABLISHED','good');
+      setChevStatus('WORMHOLE ESTABLISHED','locked');
+    } else {
+      log('ERROR: '+d.message.toUpperCase(),'bad');
+      setChevStatus(d.message.toUpperCase(),'error');
+      resetChevrons();
+      selected=[];
+    }
+  } catch(e){
+    log('CONNECTION ERROR','bad');
+  }
+  busy=false; refreshUI();
+}
+
+async function doDisconnect() {
+  if (busy||!gateOpen) return;
+  busy=true; refreshUI();
+  log('SENDING DISCONNECT SIGNAL…','');
+  try{
+    const r = await fetch('/api/disconnect',{method:'POST'});
+    const d = await r.json();
+    if(d.ok){
+      gateOpen=false;
+      showHorizon(false);
+      resetChevrons();
+      resetRing();
+      selected=[];
+      log('WORMHOLE DISENGAGED','hi');
+      setChevStatus('GATE OFFLINE — AWAITING INPUT','');
+    } else {
+      log('ERROR: '+d.message.toUpperCase(),'bad');
+    }
+  } catch(e){ log('CONNECTION ERROR','bad'); }
+  busy=false; refreshUI();
+}
+
+async function doIris() {
+  if(busy) return;
+  busy=true; refreshUI();
+  const action = irisOpen?'closing':'opening';
+  log(`IRIS ${action.toUpperCase()}…`,'');
+  try{
+    const r = await fetch('/api/iris',{method:'POST'});
+    const d = await r.json();
+    if(d.ok){
+      irisOpen=d.state.irisOpen;
+      log(`IRIS ${irisOpen?'OPEN':'CLOSED'}`,'hi');
+    } else {
+      log('IRIS ERROR: '+d.message.toUpperCase(),'bad');
+    }
+  } catch(e){ log('CONNECTION ERROR','bad'); }
+  busy=false; refreshUI();
+}
+
+// ── ring reset ────────────────────────────────────────────────────────────────
+function resetRing() {
+  ringAngle = 0;
+  rotRing.setAttribute('transform', `rotate(0, ${CX}, ${CY})`);
+  document.getElementById('lockNotch').setAttribute('fill','#2a1000');
+  document.getElementById('lockNotch').setAttribute('stroke','#603000');
+  document.getElementById('centerSym').setAttribute('opacity','0');
+}
+
+// ── dialing sequence ──────────────────────────────────────────────────────────
+// Symbols 1-38 sit at evenly-spaced ring positions (index = id-1).
+// Symbol 39 (origin) sits at index 38.  All 39 are spaced over 360°.
+function symNaturalAngle(symId) {
+  const idx = symId <= 38 ? symId - 1 : 38;
+  return idx * (360 / SYMS.length); // SYMS.length = 39
+}
+
+async function dialSequence(symbols) {
+  for (let i = 0; i < symbols.length; i++) {
+    const sym = SYMS.find(s => s.id === symbols[i]);
+
+    // Show symbol in center of gate while ring spins
+    showCenterSym(sym);
+    log(`SPINNING TO GLYPH ${i + 1} :: ${sym.a}`, '');
+    setChevStatus(`CHEVRON ${i + 1} — SEARCHING…`, '');
+
+    // Rotate ring clockwise until this symbol reaches the top lock point (270°)
+    const natural   = symNaturalAngle(symbols[i]);
+    const targetAbs = (270 - natural + 3600) % 360;
+    let delta = (targetAbs - (ringAngle % 360) + 3600) % 360;
+    if (delta < 20) delta += 360; // always travel at least a little
+    const newAngle = ringAngle + delta;
+
+    await animateRing(ringAngle, newAngle, 1800 + Math.random() * 400);
+    ringAngle = newAngle;
+
+    // Brief pause — symbol glowing in center just before lock
+    await sleep(120);
+
+    // Lock: flash notch, lock chevron, sound
+    flashLockNotch();
+    lockChevronVisual(i);
+    playLockSound();
+
+    // Symbol "moves to the left" — fills its slot in the panel, fades from center
+    fillSlot(i, symbols[i]);
+    hideCenterSym();
+
+    log(`CHEVRON ${i + 1} LOCKED :: ${sym.a}`, 'good');
+    setChevStatus(`CHEVRON ${i + 1} LOCKED`, 'locked');
+
+    await sleep(400);
+  }
+}
+
+function animateRing(from, to, duration) {
+  return new Promise(resolve => {
+    const start = performance.now();
+    playRotationSound(duration / 1000);
+    function frame(now) {
+      const t = Math.min((now - start) / duration, 1);
+      // Ease: cubic decelerate (fast spin → slow stop)
+      const eased = 1 - Math.pow(1 - t, 3);
+      const angle = from + (to - from) * eased;
+      rotRing.setAttribute('transform', `rotate(${angle.toFixed(2)}, ${CX}, ${CY})`);
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+// ── center symbol display ─────────────────────────────────────────────────────
+function showCenterSym(sym) {
+  document.getElementById('cSymAbbr').textContent = sym.a;
+  document.getElementById('cSymName').textContent = sym.name;
+  fadeEl('centerSym', 0, 1, 180);
+}
+
+function hideCenterSym() {
+  fadeEl('centerSym', 1, 0, 280);
+}
+
+function fadeEl(id, from, to, duration) {
+  const el = document.getElementById(id);
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min((now - start) / duration, 1);
+    el.setAttribute('opacity', (from + (to - from) * t).toFixed(3));
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+// ── slot helpers ──────────────────────────────────────────────────────────────
+function clearSlotsForAnimation() {
+  for (let i = 0; i < 7; i++) {
+    const s = document.getElementById(`slot${i}`);
+    s.textContent = '—';
+    s.className = 'addr-slot';
+  }
+}
+
+function fillSlot(idx, symId) {
+  const sym  = SYMS.find(s => s.id === symId);
+  const slot = document.getElementById(`slot${idx}`);
+  slot.textContent = sym.a;
+  slot.className = 'addr-slot locked';           // bright flash
+  setTimeout(() => slot.classList.replace('locked','filled'), 700);
+}
+
+function lockChevronVisual(idx) {
+  const poly = document.getElementById(`ch${idx}`);
+  if (!poly) return;
+  poly.setAttribute('fill', '#cc5500');
+  poly.setAttribute('stroke', '#ff8800');
+  poly.setAttribute('stroke-width', '1.5');
+  poly.setAttribute('filter', 'url(#chGlow)');
+}
+
+function flashLockNotch() {
+  const notch = document.getElementById('lockNotch');
+  notch.setAttribute('fill', '#ff7700');
+  notch.setAttribute('stroke', '#ffcc00');
+  setTimeout(() => {
+    notch.setAttribute('fill', '#4a2000');
+    notch.setAttribute('stroke', '#aa5000');
+  }, 350);
+}
+
+// ── audio ─────────────────────────────────────────────────────────────────────
+let audioCtx = null;
+
+function getAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+
+// Convenience: create oscillator → gain → destination, returns {osc, gain}
+function osc(type, freq, gainVal, endTime) {
+  const ctx  = getAudio();
+  const t    = ctx.currentTime;
+  const node = ctx.createOscillator();
+  const g    = ctx.createGain();
+  node.type  = type;
+  node.frequency.value = freq;
+  g.gain.setValueAtTime(gainVal, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, endTime);
+  node.connect(g);
+  g.connect(ctx.destination);
+  node.start(t);
+  node.stop(endTime);
+}
+
+// Spinning ring: sawtooth motor hum, decelerating pitch
+function playRotationSound(duration) {
+  const ctx = getAudio();
+  const t   = ctx.currentTime;
+  const end = t + duration;
+
+  // Low motor hum
+  const o1 = ctx.createOscillator();
+  o1.type  = 'sawtooth';
+  o1.frequency.setValueAtTime(110, t);
+  o1.frequency.linearRampToValueAtTime(60, end);
+  const g1 = ctx.createGain();
+  g1.gain.setValueAtTime(0, t);
+  g1.gain.linearRampToValueAtTime(0.18, t + 0.06);
+  g1.gain.setValueAtTime(0.18, end - 0.12);
+  g1.gain.linearRampToValueAtTime(0, end);
+  o1.connect(g1); g1.connect(ctx.destination);
+  o1.start(t); o1.stop(end);
+
+  // Higher harmonic for mechanical texture
+  const o2 = ctx.createOscillator();
+  o2.type  = 'square';
+  o2.frequency.setValueAtTime(220, t);
+  o2.frequency.linearRampToValueAtTime(120, end);
+  const g2 = ctx.createGain();
+  g2.gain.setValueAtTime(0, t);
+  g2.gain.linearRampToValueAtTime(0.06, t + 0.06);
+  g2.gain.setValueAtTime(0.06, end - 0.12);
+  g2.gain.linearRampToValueAtTime(0, end);
+  o2.connect(g2); g2.connect(ctx.destination);
+  o2.start(t); o2.stop(end);
+}
+
+// Chevron lock: heavy thump + high metallic click
+function playLockSound() {
+  const ctx = getAudio();
+  const t   = ctx.currentTime;
+
+  // Thump — low sine, fast pitch drop
+  const o1 = ctx.createOscillator();
+  o1.type  = 'sine';
+  o1.frequency.setValueAtTime(180, t);
+  o1.frequency.exponentialRampToValueAtTime(40, t + 0.25);
+  const g1 = ctx.createGain();
+  g1.gain.setValueAtTime(1.0, t);
+  g1.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+  o1.connect(g1); g1.connect(ctx.destination);
+  o1.start(t); o1.stop(t + 0.36);
+
+  // Click — high triangle, very fast
+  const o2 = ctx.createOscillator();
+  o2.type  = 'triangle';
+  o2.frequency.setValueAtTime(1800, t);
+  o2.frequency.exponentialRampToValueAtTime(300, t + 0.08);
+  const g2 = ctx.createGain();
+  g2.gain.setValueAtTime(0.5, t);
+  g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
+  o2.connect(g2); g2.connect(ctx.destination);
+  o2.start(t); o2.stop(t + 0.11);
+}
+
+// Kawoosh: rising sweep + sub boom
+function playKawooshSound() {
+  const ctx = getAudio();
+  const t   = ctx.currentTime;
+  const dur = 2.2;
+
+  // Rising sweep
+  const o1 = ctx.createOscillator();
+  o1.type  = 'sawtooth';
+  o1.frequency.setValueAtTime(50, t);
+  o1.frequency.exponentialRampToValueAtTime(2400, t + dur * 0.30);
+  o1.frequency.exponentialRampToValueAtTime(140, t + dur);
+  const g1 = ctx.createGain();
+  g1.gain.setValueAtTime(0, t);
+  g1.gain.linearRampToValueAtTime(0.40, t + 0.06);
+  g1.gain.setValueAtTime(0.40, t + dur * 0.50);
+  g1.gain.linearRampToValueAtTime(0, t + dur);
+  o1.connect(g1); g1.connect(ctx.destination);
+  o1.start(t); o1.stop(t + dur);
+
+  // Sub boom
+  const o2 = ctx.createOscillator();
+  o2.type  = 'sine';
+  o2.frequency.setValueAtTime(80, t);
+  o2.frequency.exponentialRampToValueAtTime(30, t + dur * 0.4);
+  const g2 = ctx.createGain();
+  g2.gain.setValueAtTime(0.6, t);
+  g2.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.5);
+  o2.connect(g2); g2.connect(ctx.destination);
+  o2.start(t); o2.stop(t + dur * 0.6);
+
+  // Mid shimmer
+  const o3 = ctx.createOscillator();
+  o3.type  = 'triangle';
+  o3.frequency.setValueAtTime(400, t + 0.1);
+  o3.frequency.exponentialRampToValueAtTime(1200, t + dur * 0.25);
+  o3.frequency.exponentialRampToValueAtTime(200, t + dur);
+  const g3 = ctx.createGain();
+  g3.gain.setValueAtTime(0, t);
+  g3.gain.linearRampToValueAtTime(0.18, t + 0.12);
+  g3.gain.linearRampToValueAtTime(0, t + dur);
+  o3.connect(g3); g3.connect(ctx.destination);
+  o3.start(t); o3.stop(t + dur);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function showHorizon(on) {
+  const h  = document.getElementById('horizon');
+  const hg = document.getElementById('horizonGlowEl');
+  if(on){
+    h.setAttribute('opacity','1');
+    hg.setAttribute('opacity','.3');
+    // animate in
+    let op=0;
+    const rise=()=>{op=Math.min(1,op+.08);h.setAttribute('opacity',op);hg.setAttribute('opacity',(op*.3).toString());if(op<1)requestAnimationFrame(rise);};
+    rise();
+  } else {
+    let op=1;
+    const fall=()=>{op=Math.max(0,op-.1);h.setAttribute('opacity',op);hg.setAttribute('opacity',(op*.3).toString());if(op>0)requestAnimationFrame(fall);};
+    fall();
+  }
+}
+
+// ── log helper ────────────────────────────────────────────────────────────────
+function log(msg, cls='') {
+  const wrap = document.getElementById('logWrap');
+  const line = document.createElement('div');
+  line.className = 'log-line' + (cls?' '+cls:'');
+  const t = new Date();
+  const ts = `[${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}:${t.getSeconds().toString().padStart(2,'0')}]`;
+  line.textContent = `${ts} ${msg}`;
+  wrap.appendChild(line);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function setChevStatus(msg, cls) {
+  const el = document.getElementById('chevStatus');
+  el.textContent = msg;
+  el.className = 'chev-status' + (cls?' '+cls:'');
+}
+
+// ── init ──────────────────────────────────────────────────────────────────────
+refreshUI();
+
+// starfield
+const bgC=document.getElementById('bg');const bctx=bgC.getContext('2d');
+function drawBg(){
+  bgC.width=innerWidth;bgC.height=innerHeight;
+  bctx.fillStyle='#020508';bctx.fillRect(0,0,bgC.width,bgC.height);
+  for(let i=0;i<150;i++){
+    const x=Math.random()*bgC.width,y=Math.random()*bgC.height;
+    const r=Math.random()*1.1+.1,a=Math.random()*.6+.2;
+    bctx.beginPath();bctx.arc(x,y,r,0,Math.PI*2);
+    bctx.fillStyle=`rgba(160,200,240,${a})`;bctx.fill();
+  }
+}
+drawBg();window.addEventListener('resize',drawBg);
+</script>
+</body>
+</html>
