@@ -1,0 +1,14 @@
+device:
+  layer: rpi3
+  hostname: stargate
+  user1: walterh
+  user1pass: Dummy123!
+
+image:
+  layer: image-rpios
+  boot_part_size: 200%
+  root_part_size: 300%
+  name: stargate-image
+
+layer:
+  base: bookworm-minbase
