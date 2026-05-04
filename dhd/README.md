@@ -36,3 +36,7 @@ PORT=9090 EXTERNAL_API=http://192.168.1.42:9000 ./dhd
 | POST   | `/api/disconnect` | Disengage active wormhole          |
 | POST   | `/api/iris`       | Toggle iris open/close (SCDC only) |
 | GET    | `/api/state`      | Current gate and iris state        |
+
+## Credits
+
+Sound effects from [cap_resources](https://github.com/RafaelDeJongh/cap_resources) by RafaelDeJongh.

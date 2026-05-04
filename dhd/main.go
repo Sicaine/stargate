@@ -42,6 +42,7 @@ func main() {
 	mux.HandleFunc("POST /api/disconnect", handleDisconnect)
 	mux.HandleFunc("POST /api/iris", handleIris)
 	mux.HandleFunc("GET /api/state", handleState)
+	mux.Handle("GET /sounds/", http.StripPrefix("/sounds/", http.FileServer(http.Dir("sounds"))))
 
 	addr := ":" + getEnv("PORT", "8080")
 	log.Printf("stargate control listening on %s", addr)

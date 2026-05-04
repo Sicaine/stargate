@@ -258,6 +258,7 @@ svg#gate{
     <button class="act-btn dial" id="btnDial" disabled>DIAL</button>
     <button class="act-btn disc" id="btnDisc" disabled>DISCONNECT</button>
     <button class="act-btn iris" id="btnIris">IRIS OPEN</button>
+    <button class="act-btn" id="btnAudioTest" style="border-color:#555;color:#888">♪ TEST</button>
   </div>
 </div>
 
@@ -428,35 +429,44 @@ document.getElementById('btnIris').addEventListener('click', doIris);
 
 async function doDial() {
   if (busy || selected.length!==7) return;
-  // Properly resume AudioContext while still in the user-gesture call stack.
-  // We await it so the context is guaranteed 'running' before any sound plays.
-  try { await getAudio().resume(); } catch(e) { log('AUDIO: ' + e.message, 'warn'); }
   busy=true; refreshUI();
-  log('VERIFYING ADDRESS…','');
-  setChevStatus('VERIFYING…','encoding');
+  log('INITIATING DIAL SEQUENCE…','');
+  setChevStatus('DIALING…','encoding');
   try{
+    // Ensure sounds are loaded (preload triggered on first pointer interaction,
+    // but this is a safety net for keyboard or programmatic invocation)
+    await ensureSounds();
+    await getAudio().resume();
+
+    // Always animate first — hardware tells us if it worked only afterwards
+    resetChevrons();
+    clearSlotsForAnimation();
+    await dialSequence(selected);
+    stopRoll();
+
+    // Now check with the hardware whether the address is valid
     const r = await fetch('/api/dial',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({symbols:selected}),
     });
     const d = await r.json();
     if(d.ok){
-      log('ADDRESS CONFIRMED — INITIATING DIALING SEQUENCE','hi');
-      resetChevrons();
-      clearSlotsForAnimation();   // wipe slots — they fill in one-by-one during sequence
-      await dialSequence(selected);
       gateOpen=true;
-      playKawooshSound();
+      playBuf('open');
       showHorizon(true);
       log('WORMHOLE ESTABLISHED','good');
       setChevStatus('WORMHOLE ESTABLISHED','locked');
     } else {
-      log('ERROR: '+d.message.toUpperCase(),'bad');
-      setChevStatus(d.message.toUpperCase(),'error');
+      playBuf('fail');
+      log('NO DESTINATION FOUND — '+d.message.toUpperCase(),'bad');
+      setChevStatus('NO WORMHOLE FORMED','error');
+      await sleep(1200);
       resetChevrons();
+      resetRing();
       selected=[];
     }
   } catch(e){
+    stopRoll();
     log('CONNECTION ERROR','bad');
   }
   busy=false; refreshUI();
@@ -490,6 +500,7 @@ async function doIris() {
   const action = irisOpen?'closing':'opening';
   log(`IRIS ${action.toUpperCase()}…`,'');
   try{
+    playBuf(irisOpen ? 'iris_close' : 'iris_open');
     const r = await fetch('/api/iris',{method:'POST'});
     const d = await r.json();
     if(d.ok){
@@ -520,6 +531,7 @@ function symNaturalAngle(symId) {
 }
 
 async function dialSequence(symbols) {
+  startRoll(); // roll.wav plays across entire sequence (~19.88s)
   for (let i = 0; i < symbols.length; i++) {
     const sym = SYMS.find(s => s.id === symbols[i]);
 
@@ -535,16 +547,16 @@ async function dialSequence(symbols) {
     if (delta < 20) delta += 360; // always travel at least a little
     const newAngle = ringAngle + delta;
 
-    await animateRing(ringAngle, newAngle, 1800 + Math.random() * 400);
+    await animateRing(ringAngle, newAngle, 900);
     ringAngle = newAngle;
 
     // Brief pause — symbol glowing in center just before lock
-    await sleep(120);
+    await sleep(80);
 
-    // Lock: flash notch, lock chevron, sound
+    // Lock: flash notch, lock chevron, play per-chevron sound
     flashLockNotch();
     lockChevronVisual(i);
-    playLockSound();
+    playBuf(`chev${i + 1}`);
 
     // Symbol "moves to the left" — fills its slot in the panel, fades from center
     fillSlot(i, symbols[i]);
@@ -553,14 +565,14 @@ async function dialSequence(symbols) {
     log(`CHEVRON ${i + 1} LOCKED :: ${sym.a}`, 'good');
     setChevStatus(`CHEVRON ${i + 1} LOCKED`, 'locked');
 
-    await sleep(400);
+    // Wait for chevron sound to finish before next symbol
+    await sleep(CHEV_MS[i] + 200);
   }
 }
 
 function animateRing(from, to, duration) {
   return new Promise(resolve => {
     const start = performance.now();
-    playRotationSound(duration / 1000);
     function frame(now) {
       const t = Math.min((now - start) / duration, 1);
       // Ease: cubic decelerate (fast spin → slow stop)
@@ -633,136 +645,90 @@ function flashLockNotch() {
 }
 
 // ── audio ─────────────────────────────────────────────────────────────────────
-let audioCtx = null;
+// Chevron lock durations (ms) — matched to chev_usual_1..7.wav lengths
+const CHEV_MS = [1440, 1632, 1632, 1664, 2112, 1440, 1664];
+
+const SOUND_FILES = {
+  roll:       '/sounds/roll.wav',
+  open:       '/sounds/open.mp3',
+  fail:       '/sounds/fail.mp3',
+  iris_open:  '/sounds/iris_open.mp3',
+  iris_close: '/sounds/iris_close.mp3',
+  chev1: '/sounds/chev_usual_1.wav',
+  chev2: '/sounds/chev_usual_2.wav',
+  chev3: '/sounds/chev_usual_3.wav',
+  chev4: '/sounds/chev_usual_4.wav',
+  chev5: '/sounds/chev_usual_5.wav',
+  chev6: '/sounds/chev_usual_6.wav',
+  chev7: '/sounds/chev_usual_7.wav',
+};
+
+let audioCtx  = null;
+const BUFS    = {};
+let loadProm  = null;
+let rollNode  = null;
 
 function getAudio() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return audioCtx;
 }
 
-// Convenience: create oscillator → gain → destination, returns {osc, gain}
-function osc(type, freq, gainVal, endTime) {
-  const ctx  = getAudio();
-  const t    = ctx.currentTime;
-  const node = ctx.createOscillator();
-  const g    = ctx.createGain();
-  node.type  = type;
-  node.frequency.value = freq;
-  g.gain.setValueAtTime(gainVal, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, endTime);
-  node.connect(g);
-  g.connect(ctx.destination);
-  node.start(t);
-  node.stop(endTime);
-}
-
-// Spinning ring: sawtooth motor hum, decelerating pitch
-function playRotationSound(duration) {
+async function loadSounds() {
   const ctx = getAudio();
-  const t   = ctx.currentTime;
-  const end = t + duration;
-
-  // Low motor hum
-  const o1 = ctx.createOscillator();
-  o1.type  = 'sawtooth';
-  o1.frequency.setValueAtTime(110, t);
-  o1.frequency.linearRampToValueAtTime(60, end);
-  const g1 = ctx.createGain();
-  g1.gain.setValueAtTime(0, t);
-  g1.gain.linearRampToValueAtTime(0.18, t + 0.06);
-  g1.gain.setValueAtTime(0.18, end - 0.12);
-  g1.gain.linearRampToValueAtTime(0, end);
-  o1.connect(g1); g1.connect(ctx.destination);
-  o1.start(t); o1.stop(end);
-
-  // Higher harmonic for mechanical texture
-  const o2 = ctx.createOscillator();
-  o2.type  = 'square';
-  o2.frequency.setValueAtTime(220, t);
-  o2.frequency.linearRampToValueAtTime(120, end);
-  const g2 = ctx.createGain();
-  g2.gain.setValueAtTime(0, t);
-  g2.gain.linearRampToValueAtTime(0.06, t + 0.06);
-  g2.gain.setValueAtTime(0.06, end - 0.12);
-  g2.gain.linearRampToValueAtTime(0, end);
-  o2.connect(g2); g2.connect(ctx.destination);
-  o2.start(t); o2.stop(end);
+  await Promise.all(Object.entries(SOUND_FILES).map(async ([key, url]) => {
+    try {
+      const ab = await (await fetch(url)).arrayBuffer();
+      BUFS[key] = await ctx.decodeAudioData(ab);
+    } catch(e) {
+      log(`AUDIO LOAD FAIL: ${key}`, 'warn');
+    }
+  }));
 }
 
-// Chevron lock: heavy thump + high metallic click
-function playLockSound() {
+async function ensureSounds() {
+  if (!loadProm) loadProm = loadSounds();
+  await loadProm;
+}
+
+// One-time preload on first user interaction
+let preloaded = false;
+document.addEventListener('pointerdown', () => {
+  if (preloaded) return;
+  preloaded = true;
+  getAudio().resume().catch(()=>{});
+  ensureSounds();
+}, { once: false });
+
+function playBuf(key, loop=false) {
+  const buf = BUFS[key];
+  if (!buf) return null;
+  const src = getAudio().createBufferSource();
+  src.buffer = buf;
+  src.loop   = loop;
+  src.connect(getAudio().destination);
+  src.start();
+  return src;
+}
+
+function startRoll() {
+  stopRoll();
+  rollNode = playBuf('roll', false);
+}
+
+function stopRoll() {
+  if (!rollNode) return;
+  try { rollNode.stop(); } catch(e){}
+  rollNode = null;
+}
+
+// TEST button — plays first chevron lock sound
+document.getElementById('btnAudioTest').addEventListener('click', async () => {
   const ctx = getAudio();
-  const t   = ctx.currentTime;
-
-  // Thump — low sine, fast pitch drop
-  const o1 = ctx.createOscillator();
-  o1.type  = 'sine';
-  o1.frequency.setValueAtTime(180, t);
-  o1.frequency.exponentialRampToValueAtTime(40, t + 0.25);
-  const g1 = ctx.createGain();
-  g1.gain.setValueAtTime(1.0, t);
-  g1.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-  o1.connect(g1); g1.connect(ctx.destination);
-  o1.start(t); o1.stop(t + 0.36);
-
-  // Click — high triangle, very fast
-  const o2 = ctx.createOscillator();
-  o2.type  = 'triangle';
-  o2.frequency.setValueAtTime(1800, t);
-  o2.frequency.exponentialRampToValueAtTime(300, t + 0.08);
-  const g2 = ctx.createGain();
-  g2.gain.setValueAtTime(0.5, t);
-  g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
-  o2.connect(g2); g2.connect(ctx.destination);
-  o2.start(t); o2.stop(t + 0.11);
-}
-
-// Kawoosh: rising sweep + sub boom
-function playKawooshSound() {
-  const ctx = getAudio();
-  const t   = ctx.currentTime;
-  const dur = 2.2;
-
-  // Rising sweep
-  const o1 = ctx.createOscillator();
-  o1.type  = 'sawtooth';
-  o1.frequency.setValueAtTime(50, t);
-  o1.frequency.exponentialRampToValueAtTime(2400, t + dur * 0.30);
-  o1.frequency.exponentialRampToValueAtTime(140, t + dur);
-  const g1 = ctx.createGain();
-  g1.gain.setValueAtTime(0, t);
-  g1.gain.linearRampToValueAtTime(0.40, t + 0.06);
-  g1.gain.setValueAtTime(0.40, t + dur * 0.50);
-  g1.gain.linearRampToValueAtTime(0, t + dur);
-  o1.connect(g1); g1.connect(ctx.destination);
-  o1.start(t); o1.stop(t + dur);
-
-  // Sub boom
-  const o2 = ctx.createOscillator();
-  o2.type  = 'sine';
-  o2.frequency.setValueAtTime(80, t);
-  o2.frequency.exponentialRampToValueAtTime(30, t + dur * 0.4);
-  const g2 = ctx.createGain();
-  g2.gain.setValueAtTime(0.6, t);
-  g2.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.5);
-  o2.connect(g2); g2.connect(ctx.destination);
-  o2.start(t); o2.stop(t + dur * 0.6);
-
-  // Mid shimmer
-  const o3 = ctx.createOscillator();
-  o3.type  = 'triangle';
-  o3.frequency.setValueAtTime(400, t + 0.1);
-  o3.frequency.exponentialRampToValueAtTime(1200, t + dur * 0.25);
-  o3.frequency.exponentialRampToValueAtTime(200, t + dur);
-  const g3 = ctx.createGain();
-  g3.gain.setValueAtTime(0, t);
-  g3.gain.linearRampToValueAtTime(0.18, t + 0.12);
-  g3.gain.linearRampToValueAtTime(0, t + dur);
-  o3.connect(g3); g3.connect(ctx.destination);
-  o3.start(t); o3.stop(t + dur);
-}
+  await ctx.resume();
+  await ensureSounds();
+  playBuf('chev1');
+  log(`AUDIO TEST — chev1 (state: ${ctx.state})`, 'hi');
+});
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -818,5 +784,10 @@ function drawBg(){
 }
 drawBg();window.addEventListener('resize',drawBg);
 </script>
+
+<div style="position:fixed;bottom:.5rem;right:1rem;z-index:10;font-size:.6rem;color:#1e3828;letter-spacing:.05em">
+  sounds: <a href="https://github.com/RafaelDeJongh/cap_resources" target="_blank" rel="noopener"
+    style="color:#2a5040;text-decoration:none">cap_resources</a>
+</div>
 </body>
 </html>
